@@ -1,19 +1,18 @@
 -- Personal Resource Bar
--- Main resource bar: a modern-style "personal resource bar" that tracks
--- the player's primary power (mana/rage/energy/runic power/...) and
--- colors itself automatically, plus hosts the per-class secondary
--- resource widget (combo points, runes) defined in Classes.lua.
+-- Main power bar: tracks the player's active power (mana, rage, energy,
+-- runic power, ...), colors itself to match, and anchors the per-class
+-- secondary resource widget underneath.
 
 PRB = CreateFrame("Frame", "PersonalResourceBarAddon", UIParent)
-PRB.version = "1.0.0"
+PRB.version = "1.1.0"
 
 local DEFAULTS = {
 	point = "CENTER",
 	relPoint = "CENTER",
 	x = 0,
-	y = -220,
+	y = -200,
 	width = 220,
-	height = 22,
+	height = 20,
 	scale = 1.0,
 	locked = true,
 	showText = true,
@@ -21,19 +20,26 @@ local DEFAULTS = {
 	texture = "Interface\\TargetingFrame\\UI-StatusBar",
 }
 
-local function CopyDefaults(dst, src)
-	for k, v in pairs(src) do
-		if dst[k] == nil then
-			dst[k] = v
-		end
-	end
-	return dst
+local UPDATE_INTERVAL = 0.1
+
+local function Print(msg)
+	print("|cff33ff99Personal Resource Bar|r: " .. msg)
 end
 
 function PRB_EnsureDB()
-	PersonalResourceBarDB = PersonalResourceBarDB or {}
-	CopyDefaults(PersonalResourceBarDB, DEFAULTS)
-	return PersonalResourceBarDB
+	local db = PersonalResourceBarDB or {}
+	for k, v in pairs(DEFAULTS) do
+		if db[k] == nil then
+			db[k] = v
+		end
+	end
+	-- Built here instead of in DEFAULTS so each character gets its own
+	-- table rather than a shared reference to the defaults.
+	if type(db.colors) ~= "table" then
+		db.colors = {}
+	end
+	PersonalResourceBarDB = db
+	return db
 end
 
 -- ===== Main bar =====
@@ -42,6 +48,8 @@ local bar = CreateFrame("StatusBar", "PersonalResourceBar_MainBar", UIParent)
 PRB.bar = bar
 
 bar:SetFrameStrata("MEDIUM")
+bar:SetMovable(true)
+bar:SetClampedToScreen(true)
 bar:SetMinMaxValues(0, 1)
 bar:SetValue(0)
 
@@ -49,42 +57,44 @@ bar.bg = bar:CreateTexture(nil, "BACKGROUND")
 bar.bg:SetAllPoints(bar)
 bar.bg:SetTexture(0, 0, 0, 0.6)
 
--- 3.3.5 has no BackdropTemplate (that's a Legion+ addition), so the
--- border is just four thin textures pinned around the bar.
+-- 3.3.5a has no BackdropTemplate, so the border is four thin textures.
 local function AddBorder(frame)
-	local t = {}
 	local inset = 1
-	t.top = frame:CreateTexture(nil, "BORDER")
-	t.top:SetTexture(0, 0, 0, 1)
-	t.top:SetPoint("TOPLEFT", frame, "TOPLEFT", -inset, inset)
-	t.top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", inset, inset)
-	t.top:SetHeight(inset)
+	local top = frame:CreateTexture(nil, "BORDER")
+	top:SetTexture(0, 0, 0, 1)
+	top:SetPoint("TOPLEFT", frame, "TOPLEFT", -inset, inset)
+	top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", inset, inset)
+	top:SetHeight(inset)
 
-	t.bottom = frame:CreateTexture(nil, "BORDER")
-	t.bottom:SetTexture(0, 0, 0, 1)
-	t.bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", -inset, -inset)
-	t.bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", inset, -inset)
-	t.bottom:SetHeight(inset)
+	local bottom = frame:CreateTexture(nil, "BORDER")
+	bottom:SetTexture(0, 0, 0, 1)
+	bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", -inset, -inset)
+	bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", inset, -inset)
+	bottom:SetHeight(inset)
 
-	t.left = frame:CreateTexture(nil, "BORDER")
-	t.left:SetTexture(0, 0, 0, 1)
-	t.left:SetPoint("TOPLEFT", frame, "TOPLEFT", -inset, inset)
-	t.left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", -inset, -inset)
-	t.left:SetWidth(inset)
+	local left = frame:CreateTexture(nil, "BORDER")
+	left:SetTexture(0, 0, 0, 1)
+	left:SetPoint("TOPLEFT", frame, "TOPLEFT", -inset, inset)
+	left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", -inset, -inset)
+	left:SetWidth(inset)
 
-	t.right = frame:CreateTexture(nil, "BORDER")
-	t.right:SetTexture(0, 0, 0, 1)
-	t.right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", inset, inset)
-	t.right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", inset, -inset)
-	t.right:SetWidth(inset)
+	local right = frame:CreateTexture(nil, "BORDER")
+	right:SetTexture(0, 0, 0, 1)
+	right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", inset, inset)
+	right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", inset, -inset)
+	right:SetWidth(inset)
 end
 AddBorder(bar)
 
-bar.text = bar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+bar.text = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 bar.text:SetPoint("CENTER", bar, "CENTER", 0, 0)
 
-bar:EnableMouse(true)
-bar:SetMovable(true)
+-- Shown only while the bar is unlocked, so an empty bar is still grabbable.
+bar.moveOverlay = bar:CreateTexture(nil, "OVERLAY")
+bar.moveOverlay:SetAllPoints(bar)
+bar.moveOverlay:SetTexture(0, 1, 0, 0.25)
+bar.moveOverlay:Hide()
+
 bar:RegisterForDrag("LeftButton")
 bar:SetScript("OnDragStart", function(self)
 	if not PersonalResourceBarDB.locked then
@@ -94,11 +104,42 @@ end)
 bar:SetScript("OnDragStop", function(self)
 	self:StopMovingOrSizing()
 	local point, _, relPoint, x, y = self:GetPoint()
-	PersonalResourceBarDB.point = point
-	PersonalResourceBarDB.relPoint = relPoint
-	PersonalResourceBarDB.x = x
-	PersonalResourceBarDB.y = y
+	local db = PersonalResourceBarDB
+	db.point, db.relPoint, db.x, db.y = point, relPoint, x, y
 end)
+
+-- ===== Power tracking =====
+
+function PRB_ApplyColor()
+	local r, g, b = PRB_GetPowerColor(PRB.powerToken or "MANA")
+	bar:SetStatusBarColor(r, g, b)
+end
+
+local lastPower, lastMax, lastToken
+
+local function UpdatePower(force)
+	local token = PRB_GetPowerToken(UnitPowerType("player"))
+	local power = UnitPower("player") or 0
+	local max = UnitPowerMax("player") or 0
+	if max <= 0 then
+		max = 1
+	end
+
+	if not force and power == lastPower and max == lastMax and token == lastToken then
+		return
+	end
+	lastPower, lastMax, lastToken = power, max, token
+
+	if token ~= PRB.powerToken then
+		PRB.powerToken = token
+		PRB_ApplyColor()
+	end
+
+	bar:SetMinMaxValues(0, max)
+	bar:SetValue(power)
+	bar.text:SetText(power .. " / " .. max)
+end
+PRB.UpdatePower = UpdatePower
 
 -- ===== Layout / appearance =====
 
@@ -106,115 +147,115 @@ function PRB_ApplyLayout()
 	local db = PersonalResourceBarDB
 	bar:ClearAllPoints()
 	bar:SetPoint(db.point, UIParent, db.relPoint, db.x, db.y)
-	bar:SetSize(db.width, db.height)
+	bar:SetWidth(db.width)
+	bar:SetHeight(db.height)
 	bar:SetScale(db.scale)
+	-- Setting the texture clears the bar's color, so re-apply it after.
 	bar:SetStatusBarTexture(db.texture)
-	bar.bg:SetTexture(0, 0, 0, 0.6)
-	-- SetShown() doesn't exist on the 3.3.5 client (it's a later addition),
-	-- so toggle visibility with Show/Hide instead.
+	PRB_ApplyColor()
+
 	if db.showText then
 		bar.text:Show()
 	else
 		bar.text:Hide()
 	end
 
+	-- A locked bar must not take mouse input, or it swallows clicks meant
+	-- for the world behind it.
 	if db.locked then
-		bar:SetAlpha(1)
+		bar:EnableMouse(false)
+		bar.moveOverlay:Hide()
+	else
+		bar:EnableMouse(true)
+		bar.moveOverlay:Show()
 	end
 
-	if PRB_UpdateSecondaryLayout then
-		PRB_UpdateSecondaryLayout()
-	end
+	PRB_UpdateSecondaryLayout()
+	UpdatePower(true)
 end
 
--- ===== Power tracking =====
-
-local currentToken = nil
-
-local function UpdatePower()
-	local unit = "player"
-	local _, token = UnitPowerType(unit)
-	local cur = UnitPower(unit)
-	local max = UnitPowerMax(unit)
-
-	if max <= 0 then
-		max = 1
+function PRB_ResetSettings()
+	local db = PersonalResourceBarDB
+	for k, v in pairs(DEFAULTS) do
+		db[k] = v
 	end
-
-	bar:SetMinMaxValues(0, max)
-	bar:SetValue(cur)
-
-	if token ~= currentToken then
-		currentToken = token
-		local r, g, b = PRB_GetPowerColor(token)
-		bar:SetStatusBarColor(r, g, b)
-	end
-
-	if PersonalResourceBarDB.showText then
-		bar.text:SetText(string.format("%d / %d", cur, max))
-	end
+	db.colors = {}
+	PRB_ApplyLayout()
+	PRB_RefreshSecondary()
 end
-PRB.UpdatePower = UpdatePower
 
 -- ===== Events =====
 
+-- 3.3.5a predates the unified UNIT_POWER event, so each power type has
+-- its own event here.
+local POWER_EVENTS = {
+	"UNIT_MANA", "UNIT_MAXMANA",
+	"UNIT_RAGE", "UNIT_MAXRAGE",
+	"UNIT_FOCUS", "UNIT_MAXFOCUS",
+	"UNIT_ENERGY", "UNIT_MAXENERGY",
+	"UNIT_RUNIC_POWER", "UNIT_MAXRUNIC_POWER",
+}
+
 PRB:RegisterEvent("PLAYER_LOGIN")
 PRB:RegisterEvent("PLAYER_ENTERING_WORLD")
-PRB:RegisterEvent("UNIT_POWER")
-PRB:RegisterEvent("UNIT_MAXPOWER")
 PRB:RegisterEvent("UNIT_DISPLAYPOWER")
+for _, event in ipairs(POWER_EVENTS) do
+	PRB:RegisterEvent(event)
+end
 
-PRB:SetScript("OnEvent", function(self, event, unit, ...)
+PRB:SetScript("OnEvent", function(self, event, unit)
 	if event == "PLAYER_LOGIN" then
 		PRB_EnsureDB()
+		PRB_InitSecondary()
 		PRB_ApplyLayout()
-		currentToken = nil
-		UpdatePower()
-		if PRB_InitSecondary then
-			PRB_InitSecondary()
-		end
 	elseif event == "PLAYER_ENTERING_WORLD" then
-		currentToken = nil
-		UpdatePower()
-		if PRB_RefreshSecondary then
-			PRB_RefreshSecondary()
-		end
-	elseif event == "UNIT_POWER" or event == "UNIT_MAXPOWER" then
-		if unit == "player" then
-			UpdatePower()
-		end
+		UpdatePower(true)
+		PRB_RefreshSecondary()
 	elseif event == "UNIT_DISPLAYPOWER" then
 		if unit == "player" then
-			currentToken = nil
-			UpdatePower()
-			if PRB_RefreshSecondary then
-				PRB_RefreshSecondary()
-			end
+			UpdatePower(true)
+			PRB_RefreshSecondary()
 		end
+	elseif unit == "player" then
+		UpdatePower()
 	end
 end)
 
--- ===== Slash command =====
+-- Private-server cores don't all fire the power events reliably, so the
+-- bar is also polled at a low rate to stay in sync.
+local sinceLastUpdate = 0
+bar:SetScript("OnUpdate", function(self, elapsed)
+	sinceLastUpdate = sinceLastUpdate + elapsed
+	if sinceLastUpdate >= UPDATE_INTERVAL then
+		sinceLastUpdate = 0
+		UpdatePower()
+	end
+end)
+
+-- ===== Slash commands =====
 
 SLASH_PERSONALRESOURCEBAR1 = "/prb"
 SlashCmdList["PERSONALRESOURCEBAR"] = function(msg)
-	msg = strtrim((msg or ""):lower())
+	msg = string.gsub(string.lower(msg or ""), "^%s*(.-)%s*$", "%1")
 	local db = PersonalResourceBarDB
+
 	if msg == "lock" then
 		db.locked = true
-		print("|cff33ff99Personal Resource Bar|r: locked.")
+		PRB_ApplyLayout()
+		Print("locked.")
 	elseif msg == "unlock" then
 		db.locked = false
-		print("|cff33ff99Personal Resource Bar|r: unlocked, drag the bar to move it.")
-	elseif msg == "reset" then
-		for k, v in pairs(DEFAULTS) do
-			db[k] = v
-		end
 		PRB_ApplyLayout()
-		print("|cff33ff99Personal Resource Bar|r: position and size reset.")
+		Print("unlocked - drag the bar to move it.")
+	elseif msg == "reset" then
+		PRB_ResetSettings()
+		Print("settings reset to defaults.")
+	elseif msg == "help" then
+		Print("/prb - open options")
+		Print("/prb unlock - unlock the bar so it can be dragged")
+		Print("/prb lock - lock the bar back in place")
+		Print("/prb reset - reset position, size and colors")
 	else
-		if PRB_OpenOptions then
-			PRB_OpenOptions()
-		end
+		PRB_OpenOptions()
 	end
 end
