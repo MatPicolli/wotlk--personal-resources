@@ -1,10 +1,10 @@
 -- Personal Resource Bar
--- Main power bar: tracks the player's active power (mana, rage, energy,
--- runic power, ...), colors itself to match, and anchors the per-class
--- secondary resource widget underneath.
+-- A health bar stacked over the active power bar (mana, rage, energy,
+-- runic power, ...), both colored to match, with the per-class secondary
+-- resource orbs underneath.
 
 PRB = CreateFrame("Frame", "PersonalResourceBarAddon", UIParent)
-PRB.version = "1.1.0"
+PRB.version = "1.2.0"
 
 local DEFAULTS = {
 	point = "CENTER",
@@ -12,15 +12,22 @@ local DEFAULTS = {
 	x = 0,
 	y = -200,
 	width = 220,
-	height = 20,
+	healthHeight = 18,
+	powerHeight = 14,
+	barSpacing = 2,
+	orbSize = 14,
 	scale = 1.0,
 	locked = true,
-	showText = true,
+	showHealth = true,
 	showSecondary = true,
+	showSpark = true,
+	healthText = "auto",
+	powerText = "auto",
 	texture = "Interface\\TargetingFrame\\UI-StatusBar",
 }
 
 local UPDATE_INTERVAL = 0.1
+local SPARK_TEXTURE = "Interface\\CastingBar\\UI-CastingBar-Spark"
 
 local function Print(msg)
 	print("|cff33ff99Personal Resource Bar|r: " .. msg)
@@ -42,136 +49,232 @@ function PRB_EnsureDB()
 	return db
 end
 
--- ===== Main bar =====
+-- ===== Frames =====
 
-local bar = CreateFrame("StatusBar", "PersonalResourceBar_MainBar", UIParent)
-PRB.bar = bar
+-- Everything lives in this container, so dragging moves the whole set.
+local anchor = CreateFrame("Frame", "PersonalResourceBar_Anchor", UIParent)
+PRB.anchor = anchor
+anchor:SetFrameStrata("MEDIUM")
+anchor:SetMovable(true)
+anchor:SetClampedToScreen(true)
 
-bar:SetFrameStrata("MEDIUM")
-bar:SetMovable(true)
-bar:SetClampedToScreen(true)
-bar:SetMinMaxValues(0, 1)
-bar:SetValue(0)
-
-bar.bg = bar:CreateTexture(nil, "BACKGROUND")
-bar.bg:SetAllPoints(bar)
-bar.bg:SetTexture(0, 0, 0, 0.6)
-
--- 3.3.5a has no BackdropTemplate, so the border is four thin textures.
+-- 3.3.5a has no BackdropTemplate, so borders are four thin textures.
 local function AddBorder(frame)
 	local inset = 1
-	local top = frame:CreateTexture(nil, "BORDER")
-	top:SetTexture(0, 0, 0, 1)
-	top:SetPoint("TOPLEFT", frame, "TOPLEFT", -inset, inset)
-	top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", inset, inset)
-	top:SetHeight(inset)
-
-	local bottom = frame:CreateTexture(nil, "BORDER")
-	bottom:SetTexture(0, 0, 0, 1)
-	bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", -inset, -inset)
-	bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", inset, -inset)
-	bottom:SetHeight(inset)
-
-	local left = frame:CreateTexture(nil, "BORDER")
-	left:SetTexture(0, 0, 0, 1)
-	left:SetPoint("TOPLEFT", frame, "TOPLEFT", -inset, inset)
-	left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", -inset, -inset)
-	left:SetWidth(inset)
-
-	local right = frame:CreateTexture(nil, "BORDER")
-	right:SetTexture(0, 0, 0, 1)
-	right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", inset, inset)
-	right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", inset, -inset)
-	right:SetWidth(inset)
+	local edges = {
+		{"TOPLEFT", "TOPLEFT", -inset, inset, "TOPRIGHT", "TOPRIGHT", inset, inset, "height"},
+		{"BOTTOMLEFT", "BOTTOMLEFT", -inset, -inset, "BOTTOMRIGHT", "BOTTOMRIGHT", inset, -inset, "height"},
+		{"TOPLEFT", "TOPLEFT", -inset, inset, "BOTTOMLEFT", "BOTTOMLEFT", -inset, -inset, "width"},
+		{"TOPRIGHT", "TOPRIGHT", inset, inset, "BOTTOMRIGHT", "BOTTOMRIGHT", inset, -inset, "width"},
+	}
+	for _, e in ipairs(edges) do
+		local t = frame:CreateTexture(nil, "BORDER")
+		t:SetTexture(0, 0, 0, 1)
+		t:SetPoint(e[1], frame, e[2], e[3], e[4])
+		t:SetPoint(e[5], frame, e[6], e[7], e[8])
+		if e[9] == "height" then
+			t:SetHeight(inset)
+		else
+			t:SetWidth(inset)
+		end
+	end
 end
-AddBorder(bar)
 
-bar.text = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-bar.text:SetPoint("CENTER", bar, "CENTER", 0, 0)
+local function CreateBar(name)
+	local b = CreateFrame("StatusBar", name, anchor)
 
--- Shown only while the bar is unlocked, so an empty bar is still grabbable.
-bar.moveOverlay = bar:CreateTexture(nil, "OVERLAY")
-bar.moveOverlay:SetAllPoints(bar)
-bar.moveOverlay:SetTexture(0, 1, 0, 0.25)
-bar.moveOverlay:Hide()
+	b.bg = b:CreateTexture(nil, "BACKGROUND")
+	b.bg:SetAllPoints(b)
+	b.bg:SetTexture(0.18, 0.18, 0.18, 0.85)
 
-bar:RegisterForDrag("LeftButton")
-bar:SetScript("OnDragStart", function(self)
+	AddBorder(b)
+
+	b.spark = b:CreateTexture(nil, "OVERLAY")
+	b.spark:SetTexture(SPARK_TEXTURE)
+	b.spark:SetBlendMode("ADD")
+	b.spark:Hide()
+
+	b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	b.text:SetPoint("RIGHT", b, "RIGHT", -4, 0)
+	b.text:SetJustifyH("RIGHT")
+
+	return b
+end
+
+local healthBar = CreateBar("PersonalResourceBar_HealthBar")
+local powerBar = CreateBar("PersonalResourceBar_PowerBar")
+PRB.healthBar = healthBar
+PRB.powerBar = powerBar
+
+-- Shown only while unlocked, so an empty bar is still grabbable.
+anchor.moveOverlay = anchor:CreateTexture(nil, "OVERLAY")
+anchor.moveOverlay:SetAllPoints(anchor)
+anchor.moveOverlay:SetTexture(0, 1, 0, 0.25)
+anchor.moveOverlay:Hide()
+
+anchor:RegisterForDrag("LeftButton")
+anchor:SetScript("OnDragStart", function(self)
 	if not PersonalResourceBarDB.locked then
 		self:StartMoving()
 	end
 end)
-bar:SetScript("OnDragStop", function(self)
+anchor:SetScript("OnDragStop", function(self)
 	self:StopMovingOrSizing()
 	local point, _, relPoint, x, y = self:GetPoint()
 	local db = PersonalResourceBarDB
 	db.point, db.relPoint, db.x, db.y = point, relPoint, x, y
 end)
 
--- ===== Power tracking =====
+-- ===== Values =====
 
-function PRB_ApplyColor()
-	local r, g, b = PRB_GetPowerColor(PRB.powerToken or "MANA")
-	bar:SetStatusBarColor(r, g, b)
+local function FormatValue(mode, current, max, token)
+	if mode == "none" then
+		return ""
+	end
+	if mode == "auto" then
+		-- Matches how the game reads these: pools as a percentage,
+		-- generated resources as the number itself.
+		mode = (token == "HEALTH" or token == "MANA") and "percent" or "value"
+	end
+
+	local percent = math.floor(current / max * 100 + 0.5)
+	if mode == "percent" then
+		return percent .. "%"
+	elseif mode == "both" then
+		return current .. "  " .. percent .. "%"
+	end
+	return tostring(current)
 end
 
-local lastPower, lastMax, lastToken
-
-local function UpdatePower(force)
-	local token = PRB_GetPowerToken(UnitPowerType("player"))
-	local power = UnitPower("player") or 0
-	local max = UnitPowerMax("player") or 0
+local function UpdateBar(bar, current, max, textMode, token)
 	if max <= 0 then
 		max = 1
 	end
-
-	if not force and power == lastPower and max == lastMax and token == lastToken then
-		return
-	end
-	lastPower, lastMax, lastToken = power, max, token
-
-	if token ~= PRB.powerToken then
-		PRB.powerToken = token
-		PRB_ApplyColor()
+	if current > max then
+		current = max
 	end
 
 	bar:SetMinMaxValues(0, max)
-	bar:SetValue(power)
-	bar.text:SetText(power .. " / " .. max)
-end
-PRB.UpdatePower = UpdatePower
+	bar:SetValue(current)
+	bar.text:SetText(FormatValue(textMode, current, max, token))
 
--- ===== Layout / appearance =====
+	if PersonalResourceBarDB.showSpark and current > 0 then
+		bar.spark:ClearAllPoints()
+		bar.spark:SetPoint("CENTER", bar, "LEFT", bar:GetWidth() * (current / max), 0)
+		bar.spark:Show()
+	else
+		bar.spark:Hide()
+	end
+end
+
+function PRB_ApplyColors()
+	local hr, hg, hb = PRB_GetPowerColor("HEALTH")
+	healthBar:SetStatusBarColor(hr, hg, hb)
+	local pr, pg, pb = PRB_GetPowerColor(PRB.powerToken or "MANA")
+	powerBar:SetStatusBarColor(pr, pg, pb)
+end
+
+local lastHealth, lastHealthMax
+local lastPower, lastPowerMax, lastToken
+
+local function UpdateHealth(force)
+	local current = UnitHealth("player") or 0
+	local max = UnitHealthMax("player") or 0
+	if not force and current == lastHealth and max == lastHealthMax then
+		return
+	end
+	lastHealth, lastHealthMax = current, max
+	UpdateBar(healthBar, current, max, PersonalResourceBarDB.healthText, "HEALTH")
+end
+
+local function UpdatePower(force)
+	local token = PRB_GetPowerToken(UnitPowerType("player"))
+	local current = UnitPower("player") or 0
+	local max = UnitPowerMax("player") or 0
+
+	if not force and current == lastPower and max == lastPowerMax and token == lastToken then
+		return
+	end
+	lastPower, lastPowerMax, lastToken = current, max, token
+
+	if token ~= PRB.powerToken then
+		PRB.powerToken = token
+		PRB_ApplyColors()
+	end
+	UpdateBar(powerBar, current, max, PersonalResourceBarDB.powerText, token)
+end
+
+local function UpdateAll(force)
+	UpdateHealth(force)
+	UpdatePower(force)
+end
+PRB.UpdateAll = UpdateAll
+
+-- ===== Layout =====
+
+local function StyleBar(bar, height)
+	local db = PersonalResourceBarDB
+	bar:SetWidth(db.width)
+	bar:SetHeight(height)
+	-- Setting the texture clears the bar's color, so colors are applied
+	-- again afterwards in PRB_ApplyLayout.
+	bar:SetStatusBarTexture(db.texture)
+
+	bar.spark:SetWidth(16)
+	bar.spark:SetHeight(height * 2.2)
+
+	local path, size = bar.text:GetFont()
+	local target = math.floor(height * 0.62 + 0.5)
+	if target < 8 then
+		target = 8
+	elseif target > 16 then
+		target = 16
+	end
+	bar.text:SetFont(path, target, "OUTLINE")
+end
 
 function PRB_ApplyLayout()
 	local db = PersonalResourceBarDB
-	bar:ClearAllPoints()
-	bar:SetPoint(db.point, UIParent, db.relPoint, db.x, db.y)
-	bar:SetWidth(db.width)
-	bar:SetHeight(db.height)
-	bar:SetScale(db.scale)
-	-- Setting the texture clears the bar's color, so re-apply it after.
-	bar:SetStatusBarTexture(db.texture)
-	PRB_ApplyColor()
 
-	if db.showText then
-		bar.text:Show()
-	else
-		bar.text:Hide()
+	local totalHeight = db.powerHeight
+	if db.showHealth then
+		totalHeight = totalHeight + db.healthHeight + db.barSpacing
 	end
+
+	anchor:ClearAllPoints()
+	anchor:SetPoint(db.point, UIParent, db.relPoint, db.x, db.y)
+	anchor:SetWidth(db.width)
+	anchor:SetHeight(totalHeight)
+	anchor:SetScale(db.scale)
+
+	StyleBar(healthBar, db.healthHeight)
+	StyleBar(powerBar, db.powerHeight)
+
+	healthBar:ClearAllPoints()
+	powerBar:ClearAllPoints()
+	if db.showHealth then
+		healthBar:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
+		healthBar:Show()
+		powerBar:SetPoint("TOPLEFT", healthBar, "BOTTOMLEFT", 0, -db.barSpacing)
+	else
+		healthBar:Hide()
+		powerBar:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
+	end
+
+	PRB_ApplyColors()
 
 	-- A locked bar must not take mouse input, or it swallows clicks meant
 	-- for the world behind it.
 	if db.locked then
-		bar:EnableMouse(false)
-		bar.moveOverlay:Hide()
+		anchor:EnableMouse(false)
+		anchor.moveOverlay:Hide()
 	else
-		bar:EnableMouse(true)
-		bar.moveOverlay:Show()
+		anchor:EnableMouse(true)
+		anchor.moveOverlay:Show()
 	end
 
 	PRB_UpdateSecondaryLayout()
-	UpdatePower(true)
+	UpdateAll(true)
 end
 
 function PRB_ResetSettings()
@@ -188,7 +291,8 @@ end
 
 -- 3.3.5a predates the unified UNIT_POWER event, so each power type has
 -- its own event here.
-local POWER_EVENTS = {
+local UNIT_EVENTS = {
+	"UNIT_HEALTH", "UNIT_MAXHEALTH",
 	"UNIT_MANA", "UNIT_MAXMANA",
 	"UNIT_RAGE", "UNIT_MAXRAGE",
 	"UNIT_FOCUS", "UNIT_MAXFOCUS",
@@ -199,7 +303,7 @@ local POWER_EVENTS = {
 PRB:RegisterEvent("PLAYER_LOGIN")
 PRB:RegisterEvent("PLAYER_ENTERING_WORLD")
 PRB:RegisterEvent("UNIT_DISPLAYPOWER")
-for _, event in ipairs(POWER_EVENTS) do
+for _, event in ipairs(UNIT_EVENTS) do
 	PRB:RegisterEvent(event)
 end
 
@@ -209,26 +313,26 @@ PRB:SetScript("OnEvent", function(self, event, unit)
 		PRB_InitSecondary()
 		PRB_ApplyLayout()
 	elseif event == "PLAYER_ENTERING_WORLD" then
-		UpdatePower(true)
+		UpdateAll(true)
 		PRB_RefreshSecondary()
 	elseif event == "UNIT_DISPLAYPOWER" then
 		if unit == "player" then
-			UpdatePower(true)
+			UpdateAll(true)
 			PRB_RefreshSecondary()
 		end
 	elseif unit == "player" then
-		UpdatePower()
+		UpdateAll()
 	end
 end)
 
--- Private-server cores don't all fire the power events reliably, so the
--- bar is also polled at a low rate to stay in sync.
+-- Private-server cores don't all fire the unit events reliably, so the
+-- bars are also polled at a low rate to stay in sync.
 local sinceLastUpdate = 0
-bar:SetScript("OnUpdate", function(self, elapsed)
+anchor:SetScript("OnUpdate", function(self, elapsed)
 	sinceLastUpdate = sinceLastUpdate + elapsed
 	if sinceLastUpdate >= UPDATE_INTERVAL then
 		sinceLastUpdate = 0
-		UpdatePower()
+		UpdateAll()
 	end
 end)
 
@@ -246,14 +350,14 @@ SlashCmdList["PERSONALRESOURCEBAR"] = function(msg)
 	elseif msg == "unlock" then
 		db.locked = false
 		PRB_ApplyLayout()
-		Print("unlocked - drag the bar to move it.")
+		Print("unlocked - drag the bars to move them.")
 	elseif msg == "reset" then
 		PRB_ResetSettings()
 		Print("settings reset to defaults.")
 	elseif msg == "help" then
 		Print("/prb - open options")
-		Print("/prb unlock - unlock the bar so it can be dragged")
-		Print("/prb lock - lock the bar back in place")
+		Print("/prb unlock - unlock the bars so they can be dragged")
+		Print("/prb lock - lock them back in place")
 		Print("/prb reset - reset position, size and colors")
 	else
 		PRB_OpenOptions()

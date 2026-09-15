@@ -1,69 +1,98 @@
 -- Personal Resource Bar
--- Secondary resources: Rogue / Cat Form Druid combo points and Death
--- Knight runes. Both are laid out as a segmented row spanning the width
--- of the main bar. Only one is ever visible, chosen by class.
+-- Secondary resources drawn as orbs in sockets: Rogue / Cat Form Druid
+-- combo points, and Death Knight runes colored by rune type. Only one row
+-- is ever visible, chosen by class.
+
+local MEDIA = "Interface\\AddOns\\PersonalResourceBar\\Media\\"
+local ORB_SOCKET = MEDIA .. "orb-socket.tga"
+local ORB_FILL = MEDIA .. "orb-fill.tga"
+
+-- The fill texture carries its own glow, which is meant to spill over the
+-- socket rim, so it is drawn at very nearly the full orb size.
+local FILL_SCALE = 0.95
 
 local MAX_COMBO_POINTS = 5
 local MAX_RUNES = 6
-local SPACING = 2
 local RUNE_POLL_INTERVAL = 0.1
 
--- Parented to the main bar so it inherits scale and hides with it.
-local container = CreateFrame("Frame", "PersonalResourceBar_Secondary", PRB.bar)
+-- Parented to the bars so it inherits scale and hides with them.
+local container = CreateFrame("Frame", "PersonalResourceBar_Secondary", PRB.anchor)
 
 local playerClass
 local mode
 
+local function CreateOrb(parent, withCooldown)
+	local orb = CreateFrame("Frame", nil, parent)
+
+	orb.socket = orb:CreateTexture(nil, "BACKGROUND")
+	orb.socket:SetAllPoints(orb)
+	orb.socket:SetTexture(ORB_SOCKET)
+
+	orb.fill = orb:CreateTexture(nil, "ARTWORK")
+	orb.fill:SetTexture(ORB_FILL)
+	orb.fill:SetPoint("CENTER", orb, "CENTER", 0, 0)
+	orb.fill:Hide()
+
+	if withCooldown then
+		orb.cooldown = CreateFrame("Cooldown", nil, orb, "CooldownFrameTemplate")
+		orb.cooldown:SetAllPoints(orb)
+		orb.cooldown:Hide()
+	end
+
+	return orb
+end
+
 -- ===== Combo points =====
 
-local comboFrame = CreateFrame("Frame", nil, container)
-comboFrame:SetAllPoints(container)
-comboFrame:Hide()
+local comboRow = CreateFrame("Frame", nil, container)
+comboRow:SetPoint("CENTER", container, "CENTER", 0, 0)
+comboRow:Hide()
 
-local comboPips = {}
+local comboOrbs = {}
 for i = 1, MAX_COMBO_POINTS do
-	local pip = comboFrame:CreateTexture(nil, "ARTWORK")
-	local c = PRB_ComboPointColor
-	pip:SetTexture(c.r, c.g, c.b, 1)
-	comboPips[i] = pip
+	comboOrbs[i] = CreateOrb(comboRow, false)
 end
 
 local function UpdateCombo()
 	local points = GetComboPoints("player", "target") or 0
+	local r, g, b = PRB_GetPowerColor("COMBO")
 	for i = 1, MAX_COMBO_POINTS do
-		comboPips[i]:SetAlpha(i <= points and 1 or 0.2)
+		local orb = comboOrbs[i]
+		if i <= points then
+			orb.fill:SetVertexColor(r, g, b)
+			orb.fill:SetAlpha(1)
+			orb.fill:Show()
+		else
+			orb.fill:Hide()
+		end
 	end
 end
 
 -- ===== Death Knight runes =====
 
-local runeFrame = CreateFrame("Frame", nil, container)
-runeFrame:SetAllPoints(container)
-runeFrame:Hide()
+local runeRow = CreateFrame("Frame", nil, container)
+runeRow:SetPoint("CENTER", container, "CENTER", 0, 0)
+runeRow:Hide()
 
-local runes = {}
+local runeOrbs = {}
 for i = 1, MAX_RUNES do
-	local rune = CreateFrame("Frame", nil, runeFrame)
-	rune.bg = rune:CreateTexture(nil, "ARTWORK")
-	rune.bg:SetAllPoints(rune)
-	rune.cooldown = CreateFrame("Cooldown", nil, rune, "CooldownFrameTemplate")
-	rune.cooldown:SetAllPoints(rune)
-	runes[i] = rune
+	runeOrbs[i] = CreateOrb(runeRow, true)
 end
 
 local function UpdateRune(i)
-	local rune = runes[i]
+	local orb = runeOrbs[i]
 	local color = PRB_RuneColors[GetRuneType(i)] or PRB_RuneColors[1]
-	rune.bg:SetTexture(color.r, color.g, color.b, 1)
+	orb.fill:SetVertexColor(color.r, color.g, color.b)
+	orb.fill:Show()
 
 	local start, duration, ready = GetRuneCooldown(i)
 	if ready or not start or not duration or duration <= 0 then
-		rune.cooldown:Hide()
-		rune:SetAlpha(1)
+		orb.cooldown:Hide()
+		orb.fill:SetAlpha(1)
 	else
-		rune.cooldown:SetCooldown(start, duration)
-		rune.cooldown:Show()
-		rune:SetAlpha(0.5)
+		orb.cooldown:SetCooldown(start, duration)
+		orb.cooldown:Show()
+		orb.fill:SetAlpha(0.25)
 	end
 end
 
@@ -75,38 +104,42 @@ end
 
 -- ===== Layout =====
 
-local function LayoutRow(parent, items, count, totalWidth, height)
-	local itemWidth = (totalWidth - SPACING * (count - 1)) / count
-	if itemWidth < 1 then
-		itemWidth = 1
-	end
+local function LayoutOrbRow(row, orbs, count, size, spacing)
+	row:SetWidth(count * size + spacing * (count - 1))
+	row:SetHeight(size)
 	for i = 1, count do
-		local item = items[i]
-		item:ClearAllPoints()
-		item:SetWidth(itemWidth)
-		item:SetHeight(height)
+		local orb = orbs[i]
+		orb:ClearAllPoints()
+		orb:SetWidth(size)
+		orb:SetHeight(size)
 		if i == 1 then
-			item:SetPoint("LEFT", parent, "LEFT", 0, 0)
+			orb:SetPoint("LEFT", row, "LEFT", 0, 0)
 		else
-			item:SetPoint("LEFT", items[i - 1], "RIGHT", SPACING, 0)
+			orb:SetPoint("LEFT", orbs[i - 1], "RIGHT", spacing, 0)
 		end
+		orb.fill:SetWidth(size * FILL_SCALE)
+		orb.fill:SetHeight(size * FILL_SCALE)
 	end
 end
 
 function PRB_UpdateSecondaryLayout()
 	local db = PersonalResourceBarDB
-	local height = math.floor(db.height * 0.45 + 0.5)
-	if height < 5 then
-		height = 5
+	local size = db.orbSize
+	if size < 6 then
+		size = 6
+	end
+	local spacing = math.floor(size * 0.22 + 0.5)
+	if spacing < 2 then
+		spacing = 2
 	end
 
 	container:ClearAllPoints()
-	container:SetPoint("TOP", PRB.bar, "BOTTOM", 0, -3)
+	container:SetPoint("TOP", PRB.anchor, "BOTTOM", 0, -3)
 	container:SetWidth(db.width)
-	container:SetHeight(height)
+	container:SetHeight(size)
 
-	LayoutRow(comboFrame, comboPips, MAX_COMBO_POINTS, db.width, height)
-	LayoutRow(runeFrame, runes, MAX_RUNES, db.width, height)
+	LayoutOrbRow(comboRow, comboOrbs, MAX_COMBO_POINTS, size, spacing)
+	LayoutOrbRow(runeRow, runeOrbs, MAX_RUNES, size, spacing)
 end
 
 -- ===== Mode selection =====
@@ -151,15 +184,15 @@ function PRB_RefreshSecondary()
 	end
 	mode = newMode
 
-	comboFrame:Hide()
-	runeFrame:Hide()
+	comboRow:Hide()
+	runeRow:Hide()
 	container:SetScript("OnUpdate", nil)
 
 	if mode == "combo" then
-		comboFrame:Show()
+		comboRow:Show()
 		UpdateCombo()
 	elseif mode == "runes" then
-		runeFrame:Show()
+		runeRow:Show()
 		UpdateAllRunes()
 		-- Runes recharge continuously, so they're polled while visible
 		-- rather than trusting every core to fire RUNE_POWER_UPDATE.

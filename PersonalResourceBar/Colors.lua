@@ -16,7 +16,10 @@ PRB_PowerTokens = {
 
 -- Tuned to read like the modern personal resource bar rather than the
 -- flat primary colors the 3.3.5a client uses for its own unit frames.
+-- HEALTH and COMBO live here too so they can be recolored the same way.
 PRB_DefaultPowerColors = {
+	HEALTH      = { r = 0.15, g = 0.78, b = 0.20 },
+	COMBO       = { r = 0.95, g = 0.15, b = 0.15 },
 	MANA        = { r = 0.20, g = 0.45, b = 0.95 },
 	RAGE        = { r = 0.85, g = 0.15, b = 0.15 },
 	FOCUS       = { r = 1.00, g = 0.60, b = 0.25 },
@@ -25,8 +28,6 @@ PRB_DefaultPowerColors = {
 	RUNES       = { r = 0.50, g = 0.50, b = 0.50 },
 	RUNIC_POWER = { r = 0.30, g = 0.80, b = 0.95 },
 }
-
-PRB_ComboPointColor = { r = 1.00, g = 0.82, b = 0.20 }
 
 -- Rune type ids from GetRuneType(): 1 Blood, 2 Unholy, 3 Frost, 4 Death.
 PRB_RuneColors = {
