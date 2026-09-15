@@ -74,11 +74,14 @@ local function CreateDropdown(name, label, y, entries, key, onChange)
 	local dropdown = CreateFrame("Frame", name, panel, "UIDropDownMenuTemplate")
 	dropdown:SetPoint("TOPLEFT", RIGHT - 16, y - 18)
 
+	-- This runs immediately, before saved variables exist, and again every
+	-- time the menu is opened, so it must tolerate a missing db.
 	UIDropDownMenu_Initialize(dropdown, function()
+		local db = PersonalResourceBarDB
 		for _, entry in ipairs(entries) do
 			local info = UIDropDownMenu_CreateInfo()
 			info.text = entry.text
-			info.checked = (PersonalResourceBarDB[key] == entry.value)
+			info.checked = (db ~= nil and db[key] == entry.value)
 			info.func = function()
 				PersonalResourceBarDB[key] = entry.value
 				SetDropdownLabel(name, entry.text)
