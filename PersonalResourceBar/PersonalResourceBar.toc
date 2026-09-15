@@ -1,0 +1,12 @@
+## Interface: 30300
+## Title: Personal Resource Bar
+## Notes: Modern-style personal resource bar for WotLK 3.3.5a. Auto-configured per class (mana, rage, energy, runic power) with combo points / runes support.
+## Author: matpicolli
+## Version: 1.0.0
+## SavedVariablesPerCharacter: PersonalResourceBarDB
+
+Colors.lua
+Classes.lua
+Core.lua
+SecondaryResource.lua
+Options.lua
