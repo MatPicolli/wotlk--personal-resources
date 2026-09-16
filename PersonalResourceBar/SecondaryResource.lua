@@ -81,6 +81,12 @@ end
 
 local function UpdateRune(i)
 	local orb = runeOrbs[i]
+	-- Some 3.3.5a cores fire the rune events with an index outside the six
+	-- real rune slots, so anything without an orb is simply ignored.
+	if not orb then
+		return
+	end
+
 	local color = PRB_RuneColors[GetRuneType(i)] or PRB_RuneColors[1]
 	orb.fill:SetVertexColor(color.r, color.g, color.b)
 	orb.fill:Show()
@@ -223,8 +229,9 @@ container:SetScript("OnEvent", function(self, event, arg1)
 		end
 	elseif event == "RUNE_POWER_UPDATE" or event == "RUNE_TYPE_UPDATE" then
 		if mode == "runes" then
-			if arg1 then
-				UpdateRune(arg1)
+			local rune = tonumber(arg1)
+			if rune and rune >= 1 and rune <= MAX_RUNES then
+				UpdateRune(rune)
 			else
 				UpdateAllRunes()
 			end
